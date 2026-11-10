@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { Rig } from './rig.js';
-import { kf, add } from './poses.js';
-import { SkinDriver, findBone } from './skin.js';
+import { ClipBody, findNode, loadModel } from './body.js';
+import { layerClips, retargetClip } from './retarget.js';
+import { TAU } from './util.js';
 
 /** Height of the base of the skull above the ground in world units: fixes the giant's scale. */
 const SKULL_BASE_Y = 9.2;
@@ -121,102 +121,49 @@ function part(parent, geo, mat, x = 0, y = 0, z = 0) {
   return m;
 }
 
-/* ------------------------------------ helmet ------------------------------------ */
+/* ------------------------------------ head ------------------------------------ */
 
-// Silhouette of the helmet as [radius, height above the skull base]: a smooth cranium
-// that narrows through the cheeks to the chin.
-const HELM_PROFILE = [
-  [0.0, 1.42], [0.11, 1.41], [0.23, 1.365], [0.34, 1.28], [0.43, 1.15], [0.495, 0.98], [0.525, 0.8],
-  [0.52, 0.62], [0.485, 0.45], [0.43, 0.3], [0.36, 0.17], [0.29, 0.07], [0.25, -0.02],
-];
-const HELM_WIDTH = 0.93; // slightly narrower than it is deep
-const HELM_DEPTH = 1.1;
-
-function helmRadius(y) {
-  const P = HELM_PROFILE;
-  for (let i = 1; i < P.length; i++) {
-    if (y >= P[i][1]) {
-      const k = (y - P[i][1]) / (P[i - 1][1] - P[i][1]);
-      return P[i][0] + (P[i - 1][0] - P[i][0]) * k;
-    }
-  }
-  return P[P.length - 1][0];
-}
-
-/** A point on the helmet surface: `phi` is the angle round the head from straight ahead. */
-function onHelm(phi, y, lift = 1) {
-  const r = helmRadius(y) * lift;
-  return [Math.sin(phi) * r * HELM_WIDTH, y, Math.cos(phi) * r * HELM_DEPTH];
-}
+const HELM_HEIGHT = 1.9; // world units, chin guard to crown
+const HELM_DROP = -0.34; // where its lowest point sits relative to the base of the skull
+const HELM_FORWARD = 0.1;
 
 /**
- * A ribbon lying on the helmet surface between two angles. `centre(k)` and `half(k)` give
- * its mid-height and half-height along the way, k = 0..1.
+ * The giant's head is a modelled helmet (see README for its author), refinished: its dark
+ * greyscale texture is kept for the surface pattern but lifted to polished silver, and its
+ * eye lenses become light sources. Returns a group whose origin is the base of the skull.
  */
-function helmRibbon(phi0, phi1, centre, half, lift, steps = 40) {
-  const pos = [];
-  const idx = [];
-  const rows = 4;
-  for (let i = 0; i <= steps; i++) {
-    const k = i / steps;
-    const phi = phi0 + (phi1 - phi0) * k;
-    for (let j = 0; j <= rows; j++) pos.push(...onHelm(phi, centre(k) + half(k) * ((j / rows) * 2 - 1), lift));
-  }
-  const flip = phi1 < phi0;
-  for (let i = 0; i < steps; i++) {
-    for (let j = 0; j < rows; j++) {
-      const a = i * (rows + 1) + j;
-      const b = a + rows + 1;
-      if (flip) idx.push(a, b + 1, b, a, a + 1, b + 1);
-      else idx.push(a, b, b + 1, a, b + 1, a + 1);
-    }
-  }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setIndex(idx);
-  geo.computeVertexNormals();
-  return geo;
-}
-
-/** The giant's head: a smooth helm with one swept visor of light. Origin = base of the skull. */
-function buildHelmet(head, M) {
+function buildHead(asset, M) {
   const helm = new THREE.Group();
-  helm.position.z = 0.06;
-  head.add(helm);
+  helm.add(asset.scene);
+  asset.scene.updateMatrixWorld(true);
+  const box = new THREE.Box3().setFromObject(asset.scene);
+  const centre = box.getCenter(new THREE.Vector3());
+  const scale = HELM_HEIGHT / (box.max.y - box.min.y);
+  asset.scene.scale.setScalar(scale);
+  asset.scene.position.set(-centre.x * scale, HELM_DROP - box.min.y * scale, HELM_FORWARD - centre.z * scale);
 
-  const shell = part(helm, new THREE.LatheGeometry(HELM_PROFILE.map(([r, y]) => new THREE.Vector2(r, y)).reverse(), 56), M.silver);
-  shell.scale.set(HELM_WIDTH, 1, HELM_DEPTH);
-
-  // visor: a single band of light, tapering and sweeping up toward the temples
-  const span = 1.22;
-  const sweep = (k) => 0.8 + 0.2 * (2 * k - 1) ** 2;
-  const taper = (h) => (k) => h * Math.sqrt(Math.max(0.02, 1 - (2 * k - 1) ** 4));
-  part(helm, helmRibbon(-span - 0.07, span + 0.07, sweep, taper(0.105), 1.008), M.dark);
-  part(helm, helmRibbon(-span, span, sweep, taper(0.062), 1.016), M.glow);
-
-  // a low ridge from brow to nape, and a red flash sweeping back along each side
-  const ridge = [];
-  for (let i = 0; i <= 28; i++) {
-    const a = -1.08 + (i / 28) * 3.0; // angle over the top: brow (-) to nape (+)
-    const y = 0.72 + Math.cos(a) * 0.71;
-    ridge.push(new THREE.Vector3(0, y, -Math.sin(a) * helmRadius(y) * HELM_DEPTH * 1.004));
-  }
-  part(helm, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(ridge), 48, 0.028, 8), M.silver);
-  for (const s of [-1, 1]) {
-    const flash = helmRibbon(s * 1.42, s * 2.72, (k) => 1.0 - 0.3 * k, (k) => 0.085 * (1 - k) + 0.012, 1.01, 24);
-    part(helm, flash, M.red);
-    const ear = part(helm, new THREE.CylinderGeometry(0.105, 0.125, 0.05, 28), M.dark, s * 0.5, 0.62, -0.02);
-    ear.rotation.z = Math.PI / 2;
-  }
-  // breather: a short dark line where a mouth would be
-  part(helm, helmRibbon(-0.3, 0.3, () => 0.36, taper(0.022), 1.01, 16), M.dark);
-
-  const gem = part(helm, new THREE.OctahedronGeometry(0.055, 0), M.glow, ...onHelm(0, 1.06, 1.02));
-  gem.scale.set(0.8, 1.6, 0.5);
-  gem.rotation.x = -0.5;
-
+  let silver = null;
+  asset.scene.traverse((o) => {
+    if (!o.isMesh) return;
+    if (/lenses/.test(o.name)) {
+      o.material = M.glow;
+      return;
+    }
+    if (!silver) {
+      silver = new THREE.MeshStandardMaterial({ map: o.material.map, metalness: 0.8, roughness: 0.3 });
+      silver.onBeforeCompile = (shader) => {
+        shader.fragmentShader = shader.fragmentShader.replace(
+          '#include <map_fragment>',
+          '#include <map_fragment>\ndiffuseColor.rgb = vec3(0.74, 0.77, 0.83) * (0.5 + 7.0 * dot(diffuseColor.rgb, vec3(0.333)));',
+        );
+      };
+    }
+    o.material = silver;
+    o.castShadow = true;
+  });
   // collar over the neck stump of the base mesh
-  part(head, new THREE.CylinderGeometry(0.33, 0.43, 0.42, 36), M.dark, 0, -0.06, -0.02);
+  part(helm, new THREE.CylinderGeometry(0.33, 0.43, 0.42, 36), M.dark, 0, -0.06, -0.02);
+  return helm;
 }
 
 /** A small crest over the sternum. */
@@ -262,296 +209,135 @@ function curlFingers(bone, side, curl) {
   for (const [b, local] of turns) b.quaternion.multiply(local);
 }
 
+/* ---------------------------------- animation ---------------------------------- */
+
+/**
+ * The giant's motions come from the Mesh2Motion library (CC0): one small file per clip in
+ * public/moves/, made for a different skeleton and re-keyed onto this one at load time.
+ * The fighting clips all start from the same stance (right side leading).
+ */
+const CLIPS = [
+  'fighting-idle', 'jog', 'walk-backwards', 'strafe-left', 'strafe-right', 'shield-dash-rm', 'dodge-back', 'dodge-left', 'dodge-right',
+  'defend', 'hit-chest', 'hit-head', 'death-b', 'laytoidle', 'dizzy', 'victory', 'fighting-right-jab', 'fighting-left-jab', 'melee-hook',
+  'kick-front', 'kick-roundhouse', 'jump-attack', 'spear-throw', 'power-up', 'two-hand-blast', 'two-handed-overhead-slam',
+  'attack-ground-pound',
+];
+/** Clips made for the opposite stance: flipped left to right, so the feet do not have to swap. */
+const MIRRORED = ['melee-hook'];
+
+/** Source bone -> the bone of ours that follows it. Parents before children; the hips first. */
+const BONES = [
+  ['pelvis', 'Hip'], ['spine_01', 'Waist'], ['spine_02', 'Spine01'], ['spine_03', 'Spine02'], ['neck_01', 'NeckTwist01'], ['head', 'Head'],
+  ...['l', 'r'].flatMap((s) => {
+    const S = s.toUpperCase();
+    return [
+      [`clavicle_${s}`, `${S}_Clavicle`], [`upperarm_${s}`, `${S}_Upperarm`], [`lowerarm_${s}`, `${S}_Forearm`], [`hand_${s}`, `${S}_Hand`],
+      [`thigh_${s}`, `${S}_Thigh`], [`calf_${s}`, `${S}_Calf`], [`foot_${s}`, `${S}_Foot`], [`ball_${s}`, `${S}_ToeBase`],
+    ];
+  }),
+];
+const otherSide = (name) => name.replace(/^([LR])_/, (m, side) => (side === 'L' ? 'R_' : 'L_'));
+/** The bones that hold the guard: taken from the fighting stance while the legs walk. */
+const GUARD_BONES = ['Spine01', 'Spine02', 'NeckTwist01', 'Head', ...['L', 'R'].flatMap((S) => [`${S}_Clavicle`, `${S}_Upperarm`, `${S}_Forearm`, `${S}_Hand`])];
+const GAITS = ['jog', 'walk-backwards', 'strafe-left', 'strafe-right'];
+
+/** Everything createHero() needs, fetched in parallel. */
+export async function loadHero(base) {
+  const [model, head, ...moves] = await Promise.all([
+    loadModel(`${base}models/titan-body.glb`),
+    loadModel(`${base}models/titan-head.glb`),
+    ...CLIPS.map((name) => loadModel(`${base}moves/${name}.glb`)),
+  ]);
+  return { model, head, moves: moves.map((m, i) => ({ name: CLIPS[i], scene: m.scene, clip: m.animations[0] })) };
+}
+
+/** Ground one stride of the forward gait covers (measured with tools/lab.js). */
+const STRIDE = 8.4;
+
+const HERO_BODY = {
+  file: 'titan-body.glb',
+  points: { handL: 'CC_Base_L_Mid1', handR: 'CC_Base_R_Mid1', footL: 'CC_Base_L_ToeBase', footR: 'CC_Base_R_ToeBase', core: 'CC_Base_Spine02' },
+  react: { flinch: 0, recoil: 0.3, guard: 0, sway: 0.02 },
+  states: {
+    idle: { clip: 'fighting-idle', loop: true },
+    // advancing is a jog; backing off and circling are short steps, whose clips cover so
+    // little ground that playing them foot-for-foot would blur the legs: `rate` lets them slide a little
+    walk: { clip: 'jog+guard', stride: 1 },
+    walkBack: { clip: 'walk-backwards+guard', stride: 1, rate: 2.5 },
+    strafeL: { clip: 'strafe-left+guard', stride: 1, rate: 1.9 },
+    strafeR: { clip: 'strafe-right+guard', stride: 1, rate: 1.9 },
+    dash: { clip: 'shield-dash-rm', from: 0.05, speed: 1.6 },
+    dashBack: { clip: 'dodge-back', speed: 2 },
+    dashL: { clip: 'dodge-left', speed: 2 },
+    dashR: { clip: 'dodge-right', speed: 2 },
+    guard: { clip: 'defend', loop: true },
+    hit: { clip: 'hit-chest' },
+    hitHeavy: { clip: 'hit-head' },
+    down: { clip: 'death-b', speed: 1.8 },
+    getup: { clip: 'laytoidle', speed: 2.2 },
+    dizzy: { clip: 'dizzy', loop: true },
+    ko: { clip: 'death-b', speed: 1.2 },
+    win: { clip: 'victory', loop: true, speed: 0.85 },
+  },
+};
+
 /**
  * Build the hero around a rigged base body (see tools/extract-body.mjs).
- * The proxy Rig's joints are placed on the model's own bones, so gameplay points
- * (fists, feet, ground contacts) line up with what is drawn.
+ * @param assets what loadHero() resolved to
  */
-export function createHero({ scene, mesh }) {
-  const rig = new Rig();
+export function createHero({ model, head, moves }) {
+  const scene = model.scene;
   const M = heroMaterials();
-
-  const holder = new THREE.Group();
-  holder.add(scene);
-  rig.root.add(holder);
-  const bone = (name) => findBone(scene, 'CC_Base_' + name);
-  const at = (name) => bone(name).getWorldPosition(new THREE.Vector3());
-
-  rig.root.updateMatrixWorld(true);
-  holder.scale.setScalar(SKULL_BASE_Y / at('Head').y);
-  rig.root.updateMatrixWorld(true);
-
-  mesh.material = suitMaterial(mesh.getWorldScale(new THREE.Vector3()).x / BODY_HEIGHT);
+  const bone = (name) => findNode(scene, 'CC_Base_' + name);
+  let mesh = null;
+  scene.traverse((o) => {
+    if (o.isSkinnedMesh) mesh ??= o;
+  });
+  scene.updateMatrixWorld(true);
+  const unit = bone('Head').getWorldPosition(new THREE.Vector3()).y / SKULL_BASE_Y; // model units per world unit
+  mesh.material = suitMaterial(mesh.getWorldScale(new THREE.Vector3()).x / (BODY_HEIGHT * unit));
   mesh.castShadow = true;
-  mesh.frustumCulled = false; // its bounds are those of the bind pose
 
-  const rel = (a, b) => [a.x - b.x, a.y - b.y, a.z - b.z];
-  const P = { hip: at('Hip'), waist: at('Waist'), chest: at('Spine02'), head: at('Head') };
-  const hips = rig.joint('hips', rig.body, P.hip.x, P.hip.y, P.hip.z);
-  const torso = rig.joint('torso', hips, ...rel(P.waist, P.hip));
-  const chest = rig.joint('chest', torso, ...rel(P.chest, P.waist));
-  const head = rig.joint('head', chest, ...rel(P.head, P.chest));
-  const links = [
-    { joint: hips, bone: bone('Hip') },
-    { joint: torso, bone: bone('Waist') },
-    { joint: torso, toward: chest, mix: 0.5, bone: bone('Spine01') }, // spread the bend along the spine
-    { joint: chest, bone: bone('Spine02') },
-    { joint: chest, toward: head, mix: 0.45, bone: bone('NeckTwist01') },
-    { joint: head, bone: bone('Head') },
-  ];
-
-  for (const n of ['L', 'R']) {
-    const upper = at(`${n}_Upperarm`);
-    const fore = at(`${n}_Forearm`);
-    const wrist = at(`${n}_Hand`);
-    const knuckle = at(`${n}_Mid1`);
-    const sh = rig.joint('sh' + n, chest, ...rel(upper, P.chest));
-    const el = rig.joint('el' + n, sh, 0, -upper.distanceTo(fore), 0);
-    rig.point('hand' + n, el, 0, -(fore.distanceTo(wrist) + wrist.distanceTo(knuckle)), 0, 0.36);
-    links.push(
-      { shoulder: sh, chest, bone: bone(`${n}_Clavicle`) }, // the collarbone follows a raised arm
-      { joint: sh, bone: bone(`${n}_Upperarm`), child: bone(`${n}_Forearm`) },
-      { joint: el, bone: bone(`${n}_Forearm`), child: bone(`${n}_Hand`) },
-    );
-
-    const thigh = at(`${n}_Thigh`);
-    const calf = at(`${n}_Calf`);
-    const ankle = at(`${n}_Foot`);
-    const toe = at(`${n}_ToeBase`);
-    const th = rig.joint('th' + n, hips, ...rel(thigh, P.hip));
-    const kn = rig.joint('kn' + n, th, 0, -thigh.distanceTo(calf), 0);
-    const an = rig.joint('an' + n, kn, 0, -calf.distanceTo(ankle), 0);
-    const sole = -ankle.y; // the bind pose stands on y = 0
-    const reach = toe.z - ankle.z;
-    rig.point('toe' + n, an, 0, sole, reach + 0.5, 0);
-    rig.point('heel' + n, an, 0, sole, -0.32, 0);
-    rig.point('foot' + n, an, 0, sole * 0.5, reach * 0.8);
-    links.push(
-      { joint: th, bone: bone(`${n}_Thigh`), child: bone(`${n}_Calf`) },
-      { joint: kn, bone: bone(`${n}_Calf`), child: bone(`${n}_Foot`) },
-      { joint: an, bone: bone(`${n}_Foot`) },
-    );
-  }
-
-  // extra contacts so the giant rests on its back when knocked down
-  rig.point('cHips', hips, 0, 0, -0.1, 0.62);
-  rig.point('cChest', chest, 0, 0.75, -0.1, 0.8);
-  rig.point('cHead', head, 0, 0.7, 0, 0.64);
-  rig.point('core', chest, 0, 0.55, 0);
-
-  const driver = new SkinDriver(links, { joint: hips, bone: bone('Hip') });
-  rig.onPosed = () => driver.sync();
+  // motions first, while the skeleton still stands in its bind pose
+  const clips = moves.map(({ name, scene: source, clip }) => {
+    const links = BONES.map(([from, to]) => ({ from: findNode(source, from), to: bone(to), twin: bone(otherSide(to)) }));
+    return retargetClip(source, clip, links, findNode(source, 'root'), { name, mirror: MIRRORED.includes(name) });
+  });
+  const stance = clips.find((c) => c.name === 'fighting-idle');
+  const guard = GUARD_BONES.map((name) => bone(name).name);
+  for (const gait of GAITS) clips.push(layerClips(`${gait}+guard`, clips.find((c) => c.name === gait), stance, guard));
   for (const n of ['L', 'R']) curlFingers(bone, n, [0.75, 1.15, 0.8, 0.4]);
 
-  buildHelmet(head, M);
-  buildCrest(chest, M);
-
+  // Things worn on the body are built in world units around a bone's position, then handed
+  // to that bone to carry.
+  const mount = (name, build) => {
+    const g = new THREE.Group();
+    bone(name).getWorldPosition(g.position);
+    g.scale.setScalar(unit);
+    build(g);
+    bone(name).attach(g);
+  };
   const aura = new THREE.PointLight(0x9fefff, 3, 0, 2);
   aura.position.set(0, 0.8, 3.0);
-  chest.add(aura);
+  mount('Head', (g) => g.add(buildHead(head, M)));
+  mount('Spine02', (g) => {
+    buildCrest(g, M);
+    g.add(aura);
+  });
 
-  /** Per-frame cosmetics: the visor brightens with the energy gauge and flares while charging. */
+  /** Per-frame cosmetics: the eyes brighten with the energy gauge and flare while charging. */
   function visual(f, dt, time) {
     const e = f.energy / 100;
     const alive = f.state === 'ko' ? Math.max(0, 1 - f.t * 0.8) : 1;
     const pulse = e >= 1 ? 0.5 + 0.5 * Math.sin(time * 9) : 0;
-    M.glow.emissiveIntensity = (1.0 + e * 0.5 + pulse * 0.5 + f.glow * 2.2) * alive + 0.04;
+    M.glow.emissiveIntensity = (1.6 + e * 0.6 + pulse * 0.6 + f.glow * 2.2) * alive + 0.04;
     aura.intensity = (3 + e * 5 + f.glow * 22) * alive;
   }
 
-  rig.apply({}, 1);
-  return { rig, visual };
+  return { rig: new ClipBody({ scene, animations: clips }, { ...HERO_BODY, fit: { scale: 1 / unit } }), visual };
 }
 
-/* ---------------------------------- poses ---------------------------------- */
-
-// Orthodox fighting stance: left side leads, guard up.
-const S = {
-  y: 0,
-  body: [0, 0, 0],
-  hips: [0, -0.45, 0],
-  torso: [0.12, 0.1, 0],
-  chest: [0.06, 0.1, 0],
-  head: [-0.05, 0.25, 0],
-  shL: [-0.95, 0, 0.2],
-  elL: [-1.5, 0, 0],
-  shR: [-0.45, 0, -0.25],
-  elR: [-2.05, 0, 0],
-  thL: [-0.32, 0, 0.12],
-  knL: [0.52, 0, 0],
-  anL: [-0.2, 0, 0],
-  thR: [0.22, 0, -0.14],
-  knR: [0.52, 0, 0],
-  anR: [-0.55, 0, 0],
-};
-const H = (o) => ({ ...S, ...o });
-
-const JAB = H({
-  hips: [0, -0.75, 0], chest: [0.06, -0.15, 0], head: [-0.05, 0.8, 0],
-  shL: [-1.55, 0, 0.85], elL: [-0.05, 0, 0],
-  thL: [-0.5, 0, 0.1], knL: [0.7, 0, 0],
-});
-// the lead shoulder dips back and the weight sinks before the jab goes out
-const JAB_LOAD = H({
-  hips: [0, -0.32, 0], torso: [0.16, 0.16, 0], chest: [0.08, 0.2, 0], head: [-0.05, 0.02, 0],
-  shL: [-0.55, 0, 0.3], elL: [-2.1, 0, 0],
-  thL: [-0.5, 0, 0.1], knL: [0.78, 0, 0], knR: [0.72, 0, 0],
-});
-// hips wind away from the target with the rear hand cocked at the jaw
-const CROSS_LOAD = H({
-  hips: [0, -0.8, 0], torso: [0.14, -0.05, 0], chest: [0.06, -0.12, 0], head: [-0.05, 0.95, 0],
-  shR: [-0.15, 0, -0.35], elR: [-2.35, 0, 0], shL: [-1.1, 0, 0.5], elL: [-1.2, 0, 0],
-  thL: [-0.48, 0, 0.1], knL: [0.72, 0, 0], thR: [0.4, 0, -0.12], knR: [0.8, 0, 0],
-});
-const CROSS = H({
-  hips: [0, 0.35, 0], torso: [0.2, 0.25, 0], chest: [0.1, 0.3, 0], head: [-0.05, -0.9, 0],
-  shR: [-1.5, 0, -0.95], elR: [-0.05, 0, 0],
-  shL: [-0.5, 0, 0.3], elL: [-2.0, 0, 0],
-  thL: [-0.55, 0, 0.1], knL: [0.8, 0, 0], thR: [0.15, 0, -0.1], knR: [0.5, 0, 0],
-});
-const UPPER_WIND = H({
-  hips: [0, -0.2, 0], torso: [0.45, 0, 0], head: [0.1, 0.2, 0],
-  shL: [0.3, 0, 0.3], elL: [-1.3, 0, 0],
-  thL: [-0.7, 0, 0.1], knL: [1.1, 0, 0], anL: [-0.4, 0, 0], thR: [0.1, 0, -0.1], knR: [1.0, 0, 0],
-});
-const UPPER = H({
-  y: 0.45,
-  hips: [0, -0.7, 0], torso: [-0.22, 0, 0], chest: [-0.12, -0.25, 0], head: [-0.2, 0.95, 0],
-  shL: [-1.85, 0, 0.55], elL: [-1.6, 0, 0], shR: [0.35, 0, -0.45], elR: [-1.7, 0, 0],
-  thL: [-0.2, 0, 0.1], knL: [0.2, 0, 0], anL: [0, 0, 0], thR: [0.2, 0, -0.1], knR: [0.3, 0, 0], anR: [-0.5, 0, 0],
-});
-const KICK_CHAMBER = H({
-  hips: [0, 0.2, 0], torso: [-0.1, 0, 0], head: [0, -0.3, 0],
-  thR: [-1.5, 0, -0.1], knR: [1.9, 0, 0], anR: [0, 0, 0],
-  thL: [-0.1, 0, 0.1], knL: [0.3, 0, 0], anL: [-0.2, 0, 0],
-  shL: [-0.6, 0, 0.5], shR: [-0.3, 0, -0.6],
-});
-const KICK = H({
-  hips: [0, 0.3, 0], torso: [-0.35, 0, 0], chest: [-0.1, 0, 0], head: [0.25, -0.3, 0],
-  thR: [-1.55, 0, -0.05], knR: [0.05, 0, 0], anR: [0.35, 0, 0],
-  thL: [0.05, 0, 0.1], knL: [0.2, 0, 0], anL: [-0.25, 0, 0],
-  shL: [-0.3, 0, 0.7], elL: [-1.0, 0, 0], shR: [0.3, 0, -0.6], elR: [-1.0, 0, 0],
-});
-const HIGH_CHAMBER = H({
-  hips: [0, -0.3, 0], torso: [-0.15, 0, 0], head: [0.1, 0.3, 0],
-  thL: [-1.7, 0, 0.1], knL: [2.0, 0, 0], anL: [0, 0, 0],
-  thR: [0.05, 0, -0.1], knR: [0.3, 0, 0], anR: [-0.3, 0, 0],
-});
-const HIGH_KICK = H({
-  y: 0.2,
-  hips: [0, -0.3, 0], torso: [-0.5, 0, 0], chest: [-0.15, 0, 0], head: [0.5, 0.3, 0],
-  thL: [-2.05, 0, 0.05], knL: [0.05, 0, 0], anL: [0.4, 0, 0],
-  thR: [0.1, 0, -0.1], knR: [0.15, 0, 0], anR: [-0.25, 0, 0],
-  shL: [0.4, 0, 0.7], elL: [-0.8, 0, 0], shR: [-0.4, 0, -0.8], elR: [-1.2, 0, 0],
-});
-const FLY = H({
-  y: 2.1,
-  body: [-0.35, 0, 0], hips: [0, 0, 0], torso: [-0.2, 0, 0], chest: [0, 0, 0], head: [0.45, 0, 0],
-  thR: [-1.3, 0, 0], knR: [0, 0, 0], anR: [0.4, 0, 0],
-  thL: [-1.5, 0, 0.2], knL: [2.2, 0, 0], anL: [0, 0, 0],
-  shL: [-0.2, 0, 1.2], elL: [-0.4, 0, 0], shR: [-0.2, 0, -1.2], elR: [-0.4, 0, 0],
-});
-const LAND = H({
-  torso: [0.4, 0, 0], hips: [0, -0.2, 0],
-  thL: [-0.8, 0, 0.1], knL: [1.2, 0, 0], anL: [-0.4, 0, 0], thR: [-0.2, 0, -0.1], knR: [1.0, 0, 0], anR: [-0.8, 0, 0],
-});
-const GUARD = H({
-  torso: [0.2, 0.1, 0], head: [0.15, 0.25, 0],
-  shL: [-1.25, 0, -0.35], elL: [-1.9, 0, 0], shR: [-1.2, 0, 0.35], elR: [-1.95, 0, 0],
-  thL: [-0.5, 0, 0.1], knL: [0.8, 0, 0], anL: [-0.3, 0, 0], thR: [0.35, 0, -0.12], knR: [0.8, 0, 0],
-});
-const DASH = H({
-  y: 0.25,
-  torso: [0.45, 0.1, 0],
-  thL: [-0.9, 0, 0.1], knL: [1.2, 0, 0], anL: [-0.3, 0, 0], thR: [0.7, 0, -0.1], knR: [0.5, 0, 0],
-  shL: [-0.3, 0, 0.4], elL: [-1.6, 0, 0], shR: [0.5, 0, -0.4], elR: [-1.4, 0, 0],
-});
-const HIT = H({
-  torso: [-0.3, 0.1, 0], chest: [-0.15, 0.1, 0], head: [-0.35, 0.2, 0],
-  shL: [-0.3, 0, 0.7], elL: [-0.9, 0, 0], shR: [0.1, 0, -0.7], elR: [-0.9, 0, 0],
-  thL: [-0.2, 0, 0.1], knL: [0.4, 0, 0], thR: [0.5, 0, -0.1], knR: [0.5, 0, 0],
-});
-const HIT_HEAVY = H({
-  body: [-0.14, 0, 0], torso: [-0.5, 0.2, 0], chest: [-0.25, 0.1, 0], head: [-0.4, 0.1, 0],
-  shL: [-0.5, 0, 1.0], elL: [-0.7, 0, 0], shR: [0.2, 0, -1.0], elR: [-0.7, 0, 0],
-  thL: [-0.5, 0, 0.15], knL: [0.5, 0, 0], thR: [0.6, 0, -0.15], knR: [0.7, 0, 0],
-});
-const FALLING = H({
-  y: 1.0,
-  body: [-0.9, 0, 0], hips: [0, 0, 0], torso: [0.2, 0, 0], chest: [0.1, 0, 0], head: [0.4, 0, 0],
-  shL: [-0.8, 0, 1.0], elL: [-0.5, 0, 0], shR: [-0.8, 0, -1.0], elR: [-0.5, 0, 0],
-  thL: [-0.9, 0, 0.2], knL: [0.8, 0, 0], anL: [0, 0, 0], thR: [-0.5, 0, -0.2], knR: [1.0, 0, 0], anR: [0, 0, 0],
-});
-const LYING = H({
-  body: [-1.52, 0, 0], hips: [0, 0, 0], torso: [0, 0, 0], chest: [0, 0, 0], head: [0.15, 0.3, 0],
-  shL: [0, 0, 1.2], elL: [-0.3, 0, 0], shR: [0, 0, -1.35], elR: [-0.5, 0, 0],
-  thL: [-0.1, 0, 0.2], knL: [0.1, 0, 0], anL: [0.3, 0, 0], thR: [-0.5, 0, -0.25], knR: [0.9, 0, 0], anR: [0.2, 0, 0],
-});
-const KNEEL = H({
-  body: [-0.2, 0, 0], hips: [0, -0.2, 0], torso: [0.6, 0, 0], chest: [0.2, 0, 0], head: [0.1, 0.2, 0],
-  shL: [-0.4, 0, 0.3], elL: [-0.6, 0, 0], shR: [-0.2, 0, -0.3], elR: [-0.6, 0, 0],
-  thL: [-1.5, 0, 0.1], knL: [1.7, 0, 0], anL: [-0.2, 0, 0], thR: [-0.1, 0, -0.1], knR: [1.7, 0, 0], anR: [0.4, 0, 0],
-});
-const LANCE_WIND = H({
-  hips: [0, -0.9, 0], chest: [0.06, -0.2, 0], head: [-0.05, 1.0, 0],
-  shR: [-3.3, 0, -0.3], elR: [-1.3, 0, 0], shL: [-1.4, 0, 1.0], elL: [-0.15, 0, 0],
-});
-const LANCE_THROW = H({
-  hips: [0, 0.4, 0], torso: [0.35, 0.2, 0], chest: [0.1, 0.3, 0], head: [-0.1, -0.9, 0],
-  shR: [-1.3, 0, -0.9], elR: [-0.1, 0, 0], shL: [0.2, 0, 0.4], elL: [-1.2, 0, 0],
-  thL: [-0.6, 0, 0.1], knL: [0.9, 0, 0],
-});
-const BEAM_GATHER = H({
-  hips: [0, 0, 0], torso: [0.05, 0, 0], chest: [-0.15, 0, 0], head: [0.05, 0, 0],
-  shL: [0.25, 0, 1.45], elL: [-0.3, 0, 0], shR: [0.25, 0, -1.45], elR: [-0.3, 0, 0],
-  thL: [-0.15, 0, 0.35], knL: [0.4, 0, 0], anL: [-0.2, 0, -0.3], thR: [-0.15, 0, -0.35], knR: [0.4, 0, 0], anR: [-0.2, 0, 0.3],
-});
-const BEAM_CHARGE = H({
-  hips: [0, 0, 0], torso: [0.12, 0, 0], chest: [-0.2, 0, 0], head: [0.05, 0, 0],
-  shL: [0.35, 0, 0.5], elL: [-2.0, 0, 0], shR: [0.35, 0, -0.5], elR: [-2.0, 0, 0],
-  thL: [-0.62, 0, 0.42], knL: [1.15, 0, 0], anL: [-0.5, 0, -0.38], thR: [-0.62, 0, -0.42], knR: [1.15, 0, 0], anR: [-0.5, 0, 0.38],
-});
-const BEAM_FIRE = H({
-  hips: [0, 0, 0], torso: [0.25, 0, 0], chest: [0.05, 0, 0], head: [-0.2, 0, 0],
-  shL: [-1.72, 0, -0.32], elL: [-0.1, 0, 0], shR: [-1.72, 0, 0.32], elR: [-0.1, 0, 0],
-  thL: [-0.55, 0, 0.3], knL: [0.85, 0, 0], anL: [-0.3, 0, -0.3], thR: [0.3, 0, -0.3], knR: [0.7, 0, 0], anR: [-0.7, 0, 0.3],
-});
-const VICTORY = H({
-  hips: [0, 0, 0], torso: [-0.08, 0, 0], chest: [-0.14, 0, 0], head: [-0.28, 0, 0],
-  shR: [-2.95, 0, -0.16], elR: [-0.12, 0, 0], shL: [0.3, 0, 0.42], elL: [-1.55, 0, 0],
-  thL: [0, 0, 0.13], knL: [0, 0, 0], anL: [0, 0, -0.13], thR: [0, 0, -0.13], knR: [0, 0, 0], anR: [0, 0, 0.13],
-});
-
-const REEL = H({
-  hips: [0, -0.15, 0], torso: [0.38, 0, 0], chest: [0.2, 0, 0], head: [0.55, 0, 0],
-  shL: [0.12, 0, 0.16], elL: [-0.35, 0, 0], shR: [0.2, 0, -0.2], elR: [-0.3, 0, 0],
-  thL: [-0.25, 0, 0.2], knL: [0.6, 0, 0], anL: [-0.3, 0, -0.1], thR: [0.05, 0, -0.22], knR: [0.5, 0, 0], anR: [-0.5, 0, 0.1],
-});
-const GRAB = H({
-  hips: [0, -0.1, 0], torso: [0.35, 0, 0], chest: [0.1, 0, 0], head: [-0.3, 0.1, 0],
-  shL: [-1.35, 0, 0.25], elL: [-0.35, 0, 0], shR: [-1.35, 0, -0.25], elR: [-0.35, 0, 0],
-  thL: [-0.7, 0, 0.1], knL: [0.9, 0, 0], anL: [-0.25, 0, 0], thR: [0.35, 0, -0.1], knR: [0.6, 0, 0],
-});
-const HOIST = H({
-  hips: [0, 0, 0], torso: [-0.25, 0, 0], chest: [-0.2, 0, 0], head: [-0.2, 0, 0],
-  shL: [-2.6, 0, 0.25], elL: [-0.5, 0, 0], shR: [-2.6, 0, -0.25], elR: [-0.5, 0, 0],
-  thL: [-0.3, 0, 0.25], knL: [0.6, 0, 0], anL: [-0.3, 0, -0.25], thR: [-0.3, 0, -0.25], knR: [0.6, 0, 0], anR: [-0.3, 0, 0.25],
-});
-const SLAM = H({
-  hips: [0, 0, 0], torso: [0.7, 0, 0], chest: [0.3, 0, 0], head: [-0.6, 0, 0],
-  shL: [-0.9, 0, 0.3], elL: [-0.3, 0, 0], shR: [-0.9, 0, -0.3], elR: [-0.3, 0, 0],
-  thL: [-0.9, 0, 0.2], knL: [1.2, 0, 0], anL: [-0.3, 0, 0], thR: [0.4, 0, -0.2], knR: [0.9, 0, 0],
-});
-const STOMP_UP = H({
-  hips: [0, 0.2, 0], torso: [-0.1, 0, 0],
-  thR: [-1.7, 0, -0.1], knR: [1.7, 0, 0], anR: [0.2, 0, 0], thL: [-0.05, 0, 0.1], knL: [0.25, 0, 0], anL: [-0.2, 0, 0],
-  shL: [-0.8, 0, 0.5], shR: [-0.2, 0, -0.7],
-});
-const STOMP_DOWN = H({
-  hips: [0, 0.2, 0], torso: [0.45, 0, 0], chest: [0.15, 0, 0], head: [-0.3, -0.2, 0],
-  thR: [-0.75, 0, -0.1], knR: [0.35, 0, 0], anR: [0.3, 0, 0], thL: [0.15, 0, 0.1], knL: [0.75, 0, 0], anL: [-0.6, 0, 0],
-  shL: [-0.2, 0, 0.6], elL: [-1.2, 0, 0], shR: [0.3, 0, -0.5], elR: [-1.0, 0, 0],
-});
+/* ---------------------------------- moves ---------------------------------- */
 
 /** What a thrown lance of light is. */
 const LANCE = {
@@ -564,8 +350,8 @@ function beamMove(cost, fire, ticks, width, dmg, finisher) {
   const hit = { dmg, knock: 3, stun: 0.3, guardDmg: 6, stunDmg: 2, pierce: true, beam: true };
   const start = 0.14;
   return {
-    cost, dur: start + fire + 0.38, track: start + fire, trackRate: 0.12, armor: 2, rate: 18,
-    clip: kf([[0, BEAM_CHARGE], [0.12, BEAM_FIRE], [start + fire, BEAM_FIRE], [start + fire + 0.38, S]]),
+    cost, dur: start + fire + 0.38, track: start + fire, trackRate: 0.12, armor: 2,
+    anim: { clip: 'two-hand-blast', loop: true },
     beam: { from: ['handL', 'handR'], start, dur: fire, ticks, width, hit, finish: finisher ? { ...hit, knock: 22, kd: true } : hit },
     events: [
       { t: 0.08, type: 'glow', v: 1 },
@@ -574,106 +360,70 @@ function beamMove(cost, fire, ticks, width, dmg, finisher) {
   };
 }
 
-/** Ready stance in motion: a slow bounce on the knees with the guard riding on it. */
-const breathe = (t) => {
-  const b = Math.sin(t * 2.6);
-  const w = Math.sin(t * 1.3);
-  return {
-    hips: [0, w * 0.035, w * 0.015], torso: [b * 0.012, -w * 0.035, 0], chest: [Math.sin(t * 1.9) * 0.03, 0, 0], head: [0, w * 0.02, 0],
-    shL: [w * 0.05, 0, 0], elL: [b * 0.05, 0, 0], shR: [-w * 0.04, 0, 0], elR: [-b * 0.03, 0, 0],
-    // the bounce comes from the knees: grounding turns the flex into a dip of the whole body
-    thL: [-b * 0.04, 0, 0], knL: [b * 0.09 + 0.05, 0, 0], thR: [-b * 0.02, 0, 0], knR: [b * 0.07 + 0.05, 0, 0],
-  };
-};
-
-const clips = {
-  idle: (t) => add(S, breathe(t)),
-  // Guard stays up; the legs step in whatever direction the fighter is travelling.
-  walk: (t, f) => {
-    const s = Math.sin(f.walkPhase);
-    const c = Math.cos(f.walkPhase);
-    const fw = f.stepFwd;
-    const sd = f.stepSide;
-    return add(S, {
-      hips: [0, s * 0.05 * fw, sd * 0.05], torso: [0.07 * fw, -s * 0.07 * fw, -sd * 0.05],
-      thL: [-s * 0.4 * fw, 0, s * 0.2 * sd], knL: [Math.max(0, c) * 0.55, 0, 0],
-      thR: [s * 0.4 * fw, 0, s * 0.2 * sd], knR: [Math.max(0, -c) * 0.55, 0, 0],
-      shL: [s * 0.07, 0, 0], shR: [-s * 0.07, 0, 0],
-    });
-  },
-  dash: () => DASH,
-  guard: () => GUARD,
-  hit: () => HIT,
-  hitHeavy: () => HIT_HEAVY,
-  down: kf([[0, HIT_HEAVY], [0.26, FALLING], [0.55, LYING]]),
-  getup: kf([[0, LYING], [0.28, KNEEL], [0.55, S]]),
-  dizzy: (t) => {
-    const a = Math.sin(t * 3.1);
-    const b = Math.sin(t * 4.3 + 1);
-    return add(REEL, {
-      hips: [0, a * 0.12, a * 0.06], torso: [b * 0.1, 0, a * 0.12], chest: [0, 0, a * 0.08], head: [b * 0.12, a * 0.35, 0],
-      shL: [a * 0.12, 0, 0], shR: [-a * 0.12, 0, 0], thL: [0, 0, a * 0.05], thR: [0, 0, a * 0.05],
-    });
-  },
-  win: (t) => add(VICTORY, { y: Math.sin(t * 1.6) * 0.03, chest: [Math.sin(t * 1.6) * 0.02, 0, 0] }),
-};
-
+// Timings below are in game seconds; a move's `anim` says which stretch of which clip plays
+// and how fast, and the hit windows were read off the clips with tools/lab.js.
 const moves = {
+  // lead hand
   jab: {
-    dur: 0.3, track: 0.1, rate: 34,
-    clip: kf([[0, S], [0.04, JAB_LOAD], [0.09, JAB, 'in'], [0.17, JAB], [0.3, S, 'out']]),
+    dur: 0.3, track: 0.1,
+    anim: { clip: 'fighting-right-jab', from: 0.08, speed: 2.2 },
     lunge: [[0.02, 0.12, 7]],
-    hits: [{ t0: 0.06, t1: 0.17, point: 'handL', r: 1.0, dmg: 26, knock: 4, stun: 0.36 }],
+    hits: [{ t0: 0.05, t1: 0.16, point: 'handR', r: 1.0, dmg: 26, knock: 4, stun: 0.36 }],
     cancel: [0.12, 0.3],
     next: { light: 'cross', heavy: 'kick', lance: 'lance', beam: 'beam' },
   },
+  // rear hand
   cross: {
-    dur: 0.44, track: 0.12, rate: 34,
-    clip: kf([[0, S], [0.06, CROSS_LOAD], [0.13, CROSS, 'in'], [0.24, CROSS], [0.44, S, 'out']]),
+    dur: 0.44, track: 0.12,
+    anim: { clip: 'fighting-left-jab', from: 0.12, speed: 1.9 },
     lunge: [[0.04, 0.16, 9]],
-    hits: [{ t0: 0.1, t1: 0.24, point: 'handR', r: 1.0, dmg: 36, knock: 6, stun: 0.44 }],
+    hits: [{ t0: 0.1, t1: 0.22, point: 'handL', r: 1.0, dmg: 36, knock: 6, stun: 0.44 }],
     cancel: [0.18, 0.44],
-    next: { light: 'upper', heavy: 'highKick', lance: 'lance', beam: 'beam' },
+    next: { light: 'hook', heavy: 'highKick', lance: 'lance', beam: 'beam' },
   },
-  upper: {
-    dur: 0.68, track: 0.14, rate: 28,
-    clip: kf([[0, S], [0.12, UPPER_WIND], [0.22, UPPER, 'in'], [0.36, UPPER], [0.68, S, 'out']]),
-    lunge: [[0.08, 0.24, 9]],
-    hits: [{ t0: 0.16, t1: 0.32, point: 'handL', r: 1.3, dmg: 62, knock: 17, kd: true }],
+  // a lunging overhand that ends the three-punch string
+  hook: {
+    dur: 0.7, track: 0.14,
+    anim: { clip: 'melee-hook', speed: 0.85 },
+    lunge: [[0.08, 0.26, 6]],
+    hits: [{ t0: 0.22, t1: 0.38, point: 'handL', r: 1.4, dmg: 62, knock: 17, kd: true }],
   },
+  // front kick with the rear leg
   kick: {
-    dur: 0.64, track: 0.16, rate: 26,
-    clip: kf([[0, S], [0.14, KICK_CHAMBER], [0.24, KICK, 'in'], [0.36, KICK], [0.5, KICK_CHAMBER, 'out'], [0.64, S]]),
-    lunge: [[0.1, 0.26, 8]],
-    hits: [{ t0: 0.19, t1: 0.36, point: 'footR', r: 1.2, dmg: 68, knock: 15, stun: 0.52 }],
+    dur: 0.64, track: 0.16,
+    anim: { clip: 'kick-front', from: 0.12, speed: 1.5 },
+    lunge: [[0.08, 0.22, 6]],
+    hits: [{ t0: 0.12, t1: 0.27, point: 'footL', r: 1.2, dmg: 68, knock: 15, stun: 0.52 }],
     cancel: [0.3, 0.56],
     next: { lance: 'lance', beam: 'beam' },
   },
   highKick: {
-    dur: 0.76, track: 0.16, rate: 26,
-    clip: kf([[0, S], [0.14, HIGH_CHAMBER], [0.25, HIGH_KICK, 'in'], [0.4, HIGH_KICK], [0.58, HIGH_CHAMBER, 'out'], [0.76, S]]),
-    lunge: [[0.1, 0.26, 8]],
-    hits: [{ t0: 0.2, t1: 0.4, point: 'footL', r: 1.4, dmg: 80, knock: 20, kd: true }],
+    dur: 0.76, track: 0.16,
+    anim: { clip: 'kick-roundhouse', from: 0.12, speed: 1.5 },
+    lunge: [[0.06, 0.2, 6]],
+    hits: [{ t0: 0.11, t1: 0.29, point: 'footL', r: 1.4, dmg: 80, knock: 20, kd: true }],
   },
-  flyingKick: {
-    dur: 0.8, track: 0.1, armor: 1, rate: 24,
-    clip: kf([[0, DASH], [0.14, FLY], [0.5, { ...FLY, y: 1.5 }], [0.64, LAND], [0.8, S]]),
+  // out of a forward dash: leap and come down fist first
+  diveSmash: {
+    dur: 0.85, track: 0.1, armor: 1,
+    anim: { clip: 'jump-attack', from: 0.45, speed: 1.6 },
     lunge: [[0.04, 0.5, 24]],
-    hits: [{ t0: 0.14, t1: 0.52, point: 'footR', r: 1.5, dmg: 88, knock: 22, kd: true }],
+    hits: [{ t0: 0.4, t1: 0.57, point: 'handR', r: 1.7, dmg: 88, knock: 22, kd: true }],
+    events: [{ t: 0.5, type: 'impact', point: 'handR', size: 0.7 }],
   },
   lance: {
-    dur: 0.72, track: 0.3, cost: 25, rate: 26,
-    clip: kf([[0, S], [0.2, LANCE_WIND], [0.32, LANCE_THROW], [0.46, LANCE_THROW], [0.72, S]]),
+    dur: 0.72, track: 0.3, cost: 25,
+    anim: { clip: 'spear-throw', from: 0.15, speed: 1.4 },
     events: [
       { t: 0, type: 'glow', v: 0.6 },
-      { t: 0.3, type: 'projectile', spec: LANCE },
-      { t: 0.34, type: 'glow', v: 0 },
+      { t: 0.32, type: 'projectile', spec: LANCE },
+      { t: 0.36, type: 'glow', v: 0 },
     ],
   },
   // Hold to charge, let go to fire. Each level needs more time and more energy.
   beam: {
-    dur: 1.5, minEnergy: 35, armor: 1, track: 1.5, trackRate: 0.5, rate: 14,
-    clip: kf([[0, S], [0.25, BEAM_GATHER], [0.7, BEAM_CHARGE], [1.5, BEAM_CHARGE]]),
+    dur: 1.5, minEnergy: 35, armor: 1, track: 1.5, trackRate: 0.5,
+    anim: { clip: 'power-up', loop: true, blend: 9 },
     hold: {
       max: 1.35,
       levels: [
@@ -689,23 +439,25 @@ const moves = {
   beam3: beamMove(100, 1.25, 12, 1.35, 30, true),
   // Beats a guard, loses to any attack: the grab only catches someone standing or blocking.
   throw: {
-    dur: 0.56, track: 0.16, rate: 26,
-    clip: kf([[0, S], [0.13, GRAB], [0.3, GRAB], [0.56, S]]),
+    dur: 0.56, track: 0.16,
+    anim: { clip: 'two-hand-blast', loop: true, blend: 14 }, // both hands thrust out
     lunge: [[0.04, 0.2, 12]],
     hits: [{ t0: 0.11, t1: 0.26, point: 'handR', r: 1.5, grab: true, dmg: 0, knock: 0 }],
     onGrab: 'slam',
   },
+  // heaves the monster overhead and brings it down
   slam: {
-    dur: 1.15, track: 0, armor: 2, throws: true, rate: 16,
-    clip: kf([[0, GRAB], [0.3, HOIST], [0.52, HOIST], [0.66, SLAM], [0.9, SLAM], [1.15, S]]),
+    dur: 1.15, track: 0, armor: 2, throws: true,
+    anim: { clip: 'two-handed-overhead-slam', speed: 1.25 },
     events: [{ t: 0.6, type: 'throwRelease', hit: { dmg: 95, knock: 26, stunDmg: 30 } }],
   },
-  // Pursuit: stamp on a monster that is flat on its back.
-  stomp: {
-    dur: 0.7, track: 0.2, rate: 24,
-    clip: kf([[0, S], [0.2, STOMP_UP], [0.31, STOMP_DOWN], [0.45, STOMP_DOWN], [0.7, S]]),
+  // Pursuit: drive a fist down into a monster that is flat on the ground.
+  pound: {
+    dur: 0.7, track: 0.2,
+    anim: { clip: 'attack-ground-pound', from: 0.1, to: 1.0, speed: 1.6 },
     lunge: [[0.04, 0.2, 9]],
-    hits: [{ t0: 0.27, t1: 0.42, point: 'footR', r: 1.9, dmg: 42, knock: 0, stun: 0.4, otg: true, heavy: true }],
+    hits: [{ t0: 0.3, t1: 0.46, point: 'handR', r: 1.9, dmg: 42, knock: 0, stun: 0.4, otg: true, heavy: true }],
+    events: [{ t: 0.4, type: 'impact', point: 'handR', size: 0.5 }],
   },
 };
 
@@ -714,24 +466,23 @@ export const HERO_DEF = {
   title: '光之巨人',
   spark: [1.3, 3.4, 4.6],
   maxHp: 1000,
-  speed: 9.5,
-  stride: 0.5,
+  speed: 8.6,
+  stride: TAU / STRIDE,
   radius: 1.2,
   hurt: { r: 1.25, h: 10.6 },
   chestY: 7.6,
   turn: 9,
   dashSpeed: 30,
   dashTime: 0.26,
-  dashAttack: 'flyingKick',
+  dashAttack: 'diveSmash',
   downTime: 1.1,
-  getupTime: 0.55,
+  getupTime: 0.7,
   inputs: { light: 'jab', heavy: 'kick', lance: 'lance', beam: 'beam', throw: 'throw' },
-  /** Context-sensitive moves: a kick aimed at a floored opponent becomes a stomp. */
+  /** Context-sensitive moves: a kick aimed at a floored opponent becomes a pursuit blow. */
   resolve(f, kind) {
     const o = f.opponent;
-    if (kind === 'heavy' && o && o.state === 'down' && Math.hypot(o.pos.x - f.pos.x, o.pos.z - f.pos.z) < 7.5) return 'stomp';
+    if (kind === 'heavy' && o && o.state === 'down' && Math.hypot(o.pos.x - f.pos.x, o.pos.z - f.pos.z) < 7.5) return 'pound';
     return null;
   },
-  clips,
   moves,
 };

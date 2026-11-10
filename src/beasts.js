@@ -1,22 +1,11 @@
 /**
- * The monsters, as data for BeastBody (beast.js): which model each one is, how the animation
- * clips it shipped with map onto fighter states, where its gameplay points sit, and its moves.
+ * The monsters, as data: which model each one is, how the animation clips it shipped with map
+ * onto fighter states, where its gameplay points sit, and its moves.
  *
- * fit     how the model is scaled and placed: `size` world units along `axis` in its idle pose;
- *         `pivot` [x, z] is the spot of its footprint (fractions of the idle bounding box) that
- *         stands on the fighter's position; `turn` yaws a model that does not face +Z.
- * points  named spots, each [x, y, z] in fractions of the idle bounding box (x: its right to
- *         its left, y: ground to top, z: back to front). The nearest vertex is followed from
- *         then on. Every beast needs `core`, `footL`, `footR`; moves name the rest.
- * states  animation per fighter state: { clip, from, to, speed, blend } plays a stretch of a
- *         clip once from the moment the state begins and holds its end; `loop` keeps cycling it;
- *         `stride: n` says the clip holds n walking strides, played as the ground is covered
- *         (with `strideLength`, the ground one stride covers); `reverse` plays it backwards
- *         (getting up = falling down, reversed); `shift` slides the body along its facing as
- *         it plays; `roll` / `rest` tip a beast with no fall animation onto its side.
- * moves   as for the hero (see hero.js), with `anim` in place of a pose clip, plus
- *         `spin: [t0, t1]` (one full turn of the whole body) and `lean: [[t, pitch, lift], ...]`
- *         (keyed whole-body pitch and lift) for attacks the model has no clip for.
+ * `fit`, `points`, `states`, `react` and a move's `anim` / `spin` / `lean` are read by ClipBody
+ * and explained at the top of body.js. Every beast needs the points `core`, `footL` and
+ * `footR`; its moves name the rest. `strideLength` is the ground one walking stride covers.
+ * The other move fields (hit windows, lunges, events, AI weights) are the same as the hero's.
  */
 
 /** What a spat fireball is. */

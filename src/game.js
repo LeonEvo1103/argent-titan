@@ -15,7 +15,7 @@ import { FX } from './fx.js';
 import { Fighter, isHeavy } from './fighter.js';
 import { KaijuAI } from './ai.js';
 import { HERO_DEF } from './hero.js';
-import { BeastBody, makeBeastDef } from './beast.js';
+import { createBeast } from './beast.js';
 import { BEASTS } from './beasts.js';
 
 const MAX_PIXEL_RATIO = 1.5;
@@ -133,10 +133,9 @@ export class Game {
   /** The model for stage `index`'s monster has loaded (main.js fetches them behind the title screen). */
   addBeast(index, asset) {
     const stage = STAGES[index];
-    const spec = BEASTS[stage.beast];
-    const body = new BeastBody(asset, spec);
-    const fighter = new Fighter(makeBeastDef(stage, spec), body, this.onEvent, false);
-    fighter.visual = (f, dt, time) => body.visual(f, dt, time);
+    const beast = createBeast(asset, stage, BEASTS[stage.beast]);
+    const fighter = new Fighter(beast.def, beast.rig, this.onEvent, false);
+    fighter.visual = beast.visual;
     this.roster[index] = fighter;
     this.hud.loading(this.roster.filter(Boolean).length, STAGES.length);
   }

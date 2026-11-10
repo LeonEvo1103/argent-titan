@@ -1,14 +1,15 @@
 /**
- * Authoring aid for monsters (dev server only). In the browser console:
+ * Authoring aid for fighters' animation (dev server only). In the browser console:
  *
  *   const lab = await import('/tools/lab.js');
  *   lab.sheet(0, [['sweep', 0.3], ['sweep', 0.5], ['down', 0.6]], { views: ['side', 'front'] });
- *   lab.clip(0, 'attack1', [0, 0.2, 0.4, 0.6]);   // a raw clip, by clip time
+ *   lab.clip('hero', 'punch-jab', [0, 0.2, 0.4, 0.6]);   // a raw clip, by clip time
  *   lab.box(0);                 // idle bounding box, overall and per mesh
  *   lab.frac(0, [-3.4, 1.3, 4]) // a spot in world units -> the fractions `points` wants
  *
- * `sheet` freezes the game and draws stage N's monster once per [moveOrState, time] entry, in
- * a grid, with its named points marked; it returns where those points were in each cell.
+ * The first argument says whose body: a stage number for that stage's monster, or 'hero'.
+ * `sheet` freezes the game and draws the fighter once per [moveOrState, time] entry, in a
+ * grid, with its named points marked; it returns where those points were in each cell.
  */
 const g = window.__game;
 const T = window.__THREE;
@@ -24,12 +25,12 @@ const COLORS = [0xff2020, 0x20ff20, 0x3060ff, 0xffff20, 0xff20ff, 0x20ffff, 0xff
 const markers = [];
 const round = (v) => [v.x, v.y, v.z].map((n) => +n.toFixed(1));
 
-function summon(stage) {
+function summon(who) {
   document.querySelectorAll('.overlay, #hud, #banner').forEach((e) => (e.style.display = 'none'));
-  if (g.kaiju !== g.roster[stage]) g.startStage(stage, true);
+  if (who !== 'hero' && g.kaiju !== g.roster[who]) g.startStage(who, true);
   g.paused = true;
   g.dirty = false;
-  return g.kaiju;
+  return who === 'hero' ? g.hero : g.kaiju;
 }
 
 function freeze(f, id, t) {
@@ -42,17 +43,19 @@ function freeze(f, id, t) {
   f.animate(100, t);
 }
 
-/** opts: { views: names or [[camera], [lookAt]] pairs, cycled per cell; cols; fov; yaw; hero: [x, z]; marks } */
-export function sheet(stage, frames, opts = {}) {
-  const k = summon(stage);
+/** opts: { views: names or [[camera], [lookAt]] pairs, cycled per cell; cols; fov; yaw; other: [x, z] shows the opponent there; marks } */
+export function sheet(who, frames, opts = {}) {
+  const k = summon(who);
   k.pos.set(0, 0, 0);
   k.yaw = opts.yaw ?? 0;
-  const hero = g.hero;
-  hero.rig.root.visible = !!opts.hero;
-  if (opts.hero) {
-    hero.pos.set(opts.hero[0], 0, opts.hero[1]);
-    hero.yaw = Math.atan2(-hero.pos.x, -hero.pos.z);
-    freeze(hero, 'idle', 0);
+  const other = who === 'hero' ? g.kaiju : g.hero;
+  if (other) {
+    other.rig.root.visible = !!opts.other;
+    if (opts.other) {
+      other.pos.set(opts.other[0], 0, opts.other[1]);
+      other.yaw = Math.atan2(-other.pos.x, -other.pos.z);
+      freeze(other, 'idle', 0);
+    }
   }
 
   const r = g.renderer;
@@ -92,21 +95,21 @@ export function sheet(stage, frames, opts = {}) {
   r.setScissorTest(false);
   r.setViewport(0, 0, size.x, size.y);
   for (const m of markers) m.visible = false;
-  hero.rig.root.visible = true;
+  if (other) other.rig.root.visible = true;
   return out;
 }
 
 /** Draw the raw clip `name` at the given clip times, to find the stretches worth using. */
-export function clip(stage, name, times, opts) {
-  const k = summon(stage);
+export function clip(who, name, times, opts) {
+  const k = summon(who);
   k.def.moves.__clip = { anim: { clip: name } };
-  const out = sheet(stage, times.map((t) => ['__clip', t]), opts);
+  const out = sheet(who, times.map((t) => ['__clip', t]), opts);
   delete k.def.moves.__clip;
   return out;
 }
 
-function idleBox(stage) {
-  const k = summon(stage);
+function idleBox(who) {
+  const k = summon(who);
   k.pos.set(0, 0, 0);
   k.yaw = 0;
   k.rig.phase = {};
@@ -123,47 +126,46 @@ function idleBox(stage) {
   return { all, per };
 }
 
-export function box(stage) {
-  const { all, per } = idleBox(stage);
+export function box(who) {
+  const { all, per } = idleBox(who);
   return { all: [round(all.min), round(all.max)], per };
 }
 
-export function frac(stage, p) {
-  const { all } = idleBox(stage);
+export function frac(who, p) {
+  const { all } = idleBox(who);
   const s = all.getSize(new T.Vector3());
   return [(p[0] - all.min.x) / s.x, (p[1] - all.min.y) / s.y, (p[2] - all.min.z) / s.z].map((n) => +n.toFixed(2));
 }
 
 /**
- * Measure the walk clip on point `foot`: how many strides the clip holds (`stride` in the walk
- * state), the ground one stride covers (`strideLength`), and where in a stride that foot comes
- * down (`offset`, so footfall dust lands with the left foot).
+ * Measure a walking clip (state `gait`: 'walk', 'walkBack', 'strafeL'...) on point `foot`:
+ * how many strides the clip holds (`stride`), the ground one stride covers, and where in a
+ * stride that foot comes down (`offset`, so footfall dust lands with the left foot).
  */
-export function stride(stage, foot = 'footL', steps = 240) {
-  const k = summon(stage);
+export function stride(who, foot = 'footL', gait = 'walk', steps = 240) {
+  const k = summon(who);
   k.pos.set(0, 0, 0);
   k.yaw = 0;
-  const walk = k.rig.spec.states.walk;
-  const saved = { stride: walk.stride, offset: walk.offset };
-  walk.stride = 1; // sample the whole clip as if it were one stride
-  walk.offset = 0;
+  const states = k.rig.spec.states;
+  const saved = states.walk;
+  states.walk = { ...states[gait], stride: 1, offset: 0, rate: 1 }; // sample the whole clip as if it were one stride
   const v = new T.Vector3();
   const pts = [];
   for (let i = 0; i < steps; i++) {
     freeze(k, 'walk', i / steps);
     pts.push(k.rig.world(foot, v).clone());
   }
-  Object.assign(walk, saved);
+  states.walk = saved;
   const lo = Math.min(...pts.map((p) => p.y));
   const hi = Math.max(...pts.map((p) => p.y));
   const up = pts.map((p) => p.y > lo + (hi - lo) * 0.4);
   const plants = [];
   for (let i = 0; i < steps; i++) if (up[(i + steps - 1) % steps] && !up[i]) plants.push(i / steps);
-  const zs = pts.map((p) => p.z);
+  const span = (axis) => Math.max(...pts.map((p) => p[axis])) - Math.min(...pts.map((p) => p[axis]));
   const strides = plants.length;
   return {
     strides,
-    strideLength: +(Math.max(...zs) - Math.min(...zs)).toFixed(2),
+    strideLength: +Math.max(span('x'), span('z')).toFixed(2),
     offset: +((plants[0] ?? 0) * strides).toFixed(2),
     lift: +(hi - lo).toFixed(2),
   };

@@ -13,7 +13,7 @@ export const isHeavy = (h) => !!h.kd || !!h.heavy || h.dmg >= 60;
 
 /**
  * One combatant. Hero and monsters share this class; everything that differs lives in `def`
- * (stats, moves) and in the body `rig` (a Rig or a BeastBody: `root`, `world(name, out)`,
+ * (stats, moves) and in the body `rig` (a ClipBody: `root`, `world(name, out)`,
  * `drive(fighter, dt, time)`). Controllers only write `intent` and call queueAttack / queueDash.
  * Things the outside world should react to are reported through `emit(fighter, event)`.
  */
@@ -352,11 +352,7 @@ export class Fighter {
     this.moving = true;
   }
 
-  /**
-   * Place the body and let it animate itself for the current state. Call after positions are
-   * final for the frame. How a body animates is its own business: the hero's Rig blends our
-   * pose clips, a monster's BeastBody plays the clips its model shipped with.
-   */
+  /** Place the body and let it animate itself for the current state. Call after positions are final for the frame. */
   animate(dt, time) {
     this.rig.root.position.set(this.pos.x, 0, this.pos.z);
     this.rig.root.rotation.y = this.yaw;
