@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>银曜巨神 ARGENT TITAN</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2305070d'/%3E%3Cpath d='M6 8h20L16 27z' fill='%23dfe5ee'/%3E%3Cpath d='M11 8h10l-5 10z' fill='%23e0202e'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="stage"></canvas>
+
+    <div id="hud" class="hidden">
+      <div class="top">
+        <div class="side left">
+          <div class="name"><span id="p1-title"></span><b id="p1-name"></b></div>
+          <div class="bar hp"><i class="ghost" id="p1-ghost"></i><i class="fill" id="p1-hp"></i></div>
+          <div class="sub">
+            <div class="bar stun"><i class="fill" id="p1-st"></i></div>
+            <span class="label">眩晕</span>
+          </div>
+          <div class="sub">
+            <div class="bar energy" id="p1-en-bar"><i class="fill" id="p1-en"></i><u style="left: 35%"></u><u style="left: 65%"></u></div>
+            <span class="label">极光</span>
+          </div>
+          <div class="sub">
+            <div class="bar guard"><i class="fill" id="p1-gd"></i></div>
+            <span class="label">防御</span>
+          </div>
+        </div>
+        <div class="center">
+          <div id="timer">99</div>
+          <div id="stage-label">STAGE 1</div>
+        </div>
+        <div class="side right">
+          <div class="name"><b id="p2-name">怪兽</b><span id="p2-title"></span></div>
+          <div class="bar hp"><i class="ghost" id="p2-ghost"></i><i class="fill" id="p2-hp"></i></div>
+          <div class="sub">
+            <span class="label" id="p2-status"></span>
+            <span class="label">眩晕</span>
+            <div class="bar stun"><i class="fill" id="p2-st"></i></div>
+          </div>
+        </div>
+      </div>
+      <div id="combo" class="hidden"><b>2</b><span>连击</span></div>
+      <div id="ready" class="hidden"></div>
+      <div id="hint">
+        <kbd>W A S D</kbd>移动 <kbd>J</kbd>拳 <kbd>K</kbd>踢 <kbd>O</kbd>投 <kbd>L</kbd>防御 <kbd>空格</kbd>冲刺 <kbd>U</kbd>曜光枪 <kbd>I</kbd>按住蓄力极光炮 <kbd>P</kbd>暂停 <kbd>M</kbd>静音
+      </div>
+    </div>
+
+    <div id="banner" class="hidden">
+      <div class="main"></div>
+      <div class="sub"></div>
+    </div>
+
+    <div id="title" class="overlay">
+      <div class="logo">
+        <div class="jp">光之巨人 对战 怪兽</div>
+        <h1>银曜巨神</h1>
+        <div class="en">ARGENT TITAN</div>
+      </div>
+      <div class="controls">
+        <div><kbd>W A S D</kbd><span>移动 / 绕步</span></div>
+        <div><kbd>J</kbd><span>拳（J·J·J 三连）</span></div>
+        <div><kbd>K</kbd><span>踢（J·J·K 击倒；对倒地怪兽为追击）</span></div>
+        <div><kbd>O</kbd><span>投技（破防御，会被攻击打断）</span></div>
+        <div><kbd>L</kbd><span>按住防御</span></div>
+        <div><kbd>空格</kbd><span>闪避冲刺（前冲中 J/K 飞踢）</span></div>
+        <div><kbd>U</kbd><span>曜光枪（消耗 25 极光）</span></div>
+        <div><kbd>I</kbd><span>极光炮：按住蓄力 Lv1–3，松开发射</span></div>
+      </div>
+      <button id="start" type="button">按 Enter 开始战斗</button>
+    </div>
+
+    <div id="result" class="overlay hidden">
+      <h2 id="result-title"></h2>
+      <p id="result-sub"></p>
+      <div id="result-stats"></div>
+      <button id="result-btn" type="button"></button>
+    </div>
+
+    <div id="pause" class="overlay hidden">
+      <h2>暂停</h2>
+      <p>按 P 或 Esc 继续</p>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

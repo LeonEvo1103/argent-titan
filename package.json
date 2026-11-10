@@ -1,0 +1,18 @@
+{
+  "name": "argent-titan",
+  "private": true,
+  "version": "0.1.0",
+  "description": "银曜巨神 ARGENT TITAN — 银红相间的光之巨人对战怪兽的 3D 格斗游戏",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.187.0"
+  },
+  "devDependencies": {
+    "vite": "^8.3.7"
+  }
+}

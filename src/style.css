@@ -1,0 +1,490 @@
+:root {
+  --silver: #dfe5ee;
+  --red: #e0202e;
+  --cyan: #58e8ff;
+  --ink: #05070d;
+  font-family: 'Avenir Next', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: var(--ink);
+  color: var(--silver);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#stage {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.hidden {
+  display: none !important;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.7em;
+  padding: 0.12em 0.5em;
+  margin: 0 0.35em 0 0.9em;
+  border: 1px solid rgba(223, 229, 238, 0.45);
+  border-radius: 4px;
+  background: rgba(10, 16, 32, 0.6);
+  font: 600 0.82em/1.5 ui-monospace, 'SF Mono', Menlo, monospace;
+  color: #fff;
+  text-align: center;
+}
+
+/* ------------------------------- fight HUD ------------------------------- */
+
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+#hud .top {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: clamp(10px, 2vw, 28px);
+  align-items: start;
+  padding: clamp(10px, 2.2vh, 24px) clamp(12px, 3vw, 44px) 0;
+}
+
+.side .name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  margin-bottom: 5px;
+  font-style: italic;
+  text-shadow: 0 2px 8px #000;
+  white-space: nowrap;
+}
+
+.side .name b {
+  font-size: clamp(17px, 2.3vw, 28px);
+  letter-spacing: 0.08em;
+}
+
+.side .name span {
+  font-size: clamp(11px, 1.1vw, 14px);
+  letter-spacing: 0.22em;
+  opacity: 0.75;
+}
+
+.side.right .name {
+  justify-content: flex-end;
+}
+
+.bar {
+  position: relative;
+  height: clamp(14px, 2.4vh, 22px);
+  background: rgba(4, 8, 18, 0.72);
+  border: 1px solid rgba(223, 229, 238, 0.5);
+  transform: skewX(-18deg);
+  overflow: hidden;
+}
+
+.bar i {
+  position: absolute;
+  inset: 0;
+  transform-origin: left center;
+  transition: transform 0.08s linear;
+}
+
+.side.right .bar i {
+  transform-origin: right center;
+}
+
+.bar.hp .fill {
+  background: linear-gradient(180deg, #fff 0%, #cfd6e2 34%, #8e99ab 100%);
+}
+
+.side.right .bar.hp .fill {
+  background: linear-gradient(180deg, #ffd9a0 0%, #ff7a2a 40%, #b02a08 100%);
+}
+
+.bar.hp .ghost {
+  background: var(--red);
+  transition: transform 0.5s ease-out 0.25s;
+}
+
+.bar.hp.low .fill {
+  animation: low 0.5s steps(2) infinite;
+}
+
+@keyframes low {
+  50% {
+    filter: brightness(1.6) saturate(1.4);
+  }
+}
+
+.side .sub {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 5px;
+}
+
+.side .sub .label {
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  opacity: 0.8;
+  text-shadow: 0 1px 4px #000;
+  white-space: nowrap;
+}
+
+.side.right .sub {
+  justify-content: flex-end;
+  min-height: 16px;
+}
+
+#p2-status {
+  color: #ff6a4a;
+  font-weight: 700;
+  font-style: italic;
+}
+
+.bar.energy {
+  width: 62%;
+  height: 9px;
+}
+
+.bar.energy .fill {
+  background: linear-gradient(90deg, #1a7fa8, var(--cyan));
+}
+
+.bar.energy.full {
+  box-shadow: 0 0 14px var(--cyan);
+  animation: full 0.6s ease-in-out infinite alternate;
+}
+
+@keyframes full {
+  to {
+    filter: brightness(1.7);
+  }
+}
+
+.bar.energy u {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(4, 8, 18, 0.9);
+}
+
+.bar.stun {
+  width: 46%;
+  height: 6px;
+}
+
+.bar.stun .fill {
+  background: linear-gradient(90deg, #f0a030, #ff5a3a);
+}
+
+.side.right .bar.stun {
+  width: 30%;
+}
+
+.bar.guard {
+  width: 38%;
+  height: 6px;
+}
+
+.bar.guard .fill {
+  background: #f2c84b;
+}
+
+.center {
+  text-align: center;
+  min-width: 92px;
+  text-shadow: 0 2px 10px #000;
+}
+
+#timer {
+  font: italic 800 clamp(30px, 5vw, 54px) / 1 'Avenir Next Condensed', 'DIN Condensed', Impact, sans-serif;
+  letter-spacing: 0.02em;
+}
+
+#timer.low {
+  color: #ff5a4a;
+}
+
+#stage-label {
+  margin-top: 2px;
+  font-size: 11px;
+  letter-spacing: 0.32em;
+  opacity: 0.75;
+}
+
+#combo {
+  position: absolute;
+  left: clamp(14px, 4vw, 60px);
+  top: 30%;
+  font-style: italic;
+  text-shadow: 0 3px 12px #000, 0 0 18px rgba(88, 232, 255, 0.6);
+  animation: pop 0.18s ease-out;
+}
+
+#combo b {
+  font: italic 800 clamp(44px, 7vw, 84px) / 1 'Avenir Next Condensed', Impact, sans-serif;
+  color: #fff;
+}
+
+#combo span {
+  margin-left: 8px;
+  font-size: clamp(14px, 1.6vw, 20px);
+  letter-spacing: 0.3em;
+  color: var(--cyan);
+}
+
+@keyframes pop {
+  from {
+    transform: scale(1.5);
+    opacity: 0.4;
+  }
+}
+
+#ready {
+  position: absolute;
+  left: 50%;
+  bottom: 13%;
+  transform: translateX(-50%);
+  padding: 6px 22px;
+  border: 1px solid var(--cyan);
+  background: rgba(6, 30, 44, 0.7);
+  color: var(--cyan);
+  font-weight: 700;
+  font-style: italic;
+  font-size: clamp(11px, 1.5vw, 16px);
+  letter-spacing: 0.2em;
+  box-shadow: 0 0 22px rgba(88, 232, 255, 0.55);
+  animation: full 0.5s ease-in-out infinite alternate;
+  white-space: nowrap;
+}
+
+#hint {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: clamp(8px, 2vh, 18px);
+  text-align: center;
+  font-size: clamp(10px, 1vw, 13px);
+  opacity: 0.72;
+  text-shadow: 0 1px 4px #000;
+}
+
+/* ------------------------------- banner ------------------------------- */
+
+#banner {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 34%;
+  text-align: center;
+  pointer-events: none;
+  font-style: italic;
+  animation: slam 0.28s cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+#banner .main {
+  font: italic 800 clamp(48px, 11vw, 150px) / 0.95 'Avenir Next Condensed', 'DIN Condensed', Impact, 'PingFang SC', sans-serif;
+  letter-spacing: 0.04em;
+  background: linear-gradient(180deg, #fff 20%, #c9d2df 48%, #e0202e 52%, #7a0c14 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.85));
+}
+
+#banner.small .main {
+  font-size: clamp(30px, 5vw, 64px);
+}
+
+#banner .sub {
+  margin-top: 10px;
+  font-size: clamp(15px, 2.2vw, 28px);
+  letter-spacing: 0.5em;
+  text-shadow: 0 2px 10px #000;
+}
+
+@keyframes slam {
+  from {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+/* ------------------------------- overlays ------------------------------- */
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(14px, 3vh, 30px);
+  padding: 4vh 5vw;
+  text-align: center;
+}
+
+#title {
+  justify-content: space-between;
+  background: linear-gradient(180deg, rgba(3, 5, 12, 0.82) 0%, rgba(3, 5, 12, 0) 34%, rgba(3, 5, 12, 0) 52%, rgba(3, 5, 12, 0.9) 100%);
+}
+
+.logo .jp {
+  font-size: clamp(12px, 1.4vw, 18px);
+  letter-spacing: 0.7em;
+  text-indent: 0.7em;
+  opacity: 0.85;
+}
+
+.logo h1 {
+  margin: 0.08em 0 0;
+  font: italic 900 clamp(54px, 10vw, 136px) / 1 'PingFang SC', 'Hiragino Sans GB', sans-serif;
+  letter-spacing: 0.1em;
+  text-indent: 0.1em;
+  background: linear-gradient(180deg, #ffffff 12%, #c3ccd9 46%, #e0202e 54%, #6a0810 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.9));
+}
+
+.logo .en {
+  font: italic 700 clamp(15px, 2.2vw, 30px) / 1 'Avenir Next Condensed', 'DIN Condensed', sans-serif;
+  letter-spacing: 0.9em;
+  text-indent: 0.9em;
+  color: var(--cyan);
+  text-shadow: 0 0 18px rgba(88, 232, 255, 0.7);
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 7px 34px;
+  margin-top: auto;
+  font-size: clamp(11px, 1.15vw, 15px);
+  text-align: left;
+  text-shadow: 0 1px 6px #000;
+}
+
+.controls kbd {
+  margin-left: 0;
+  min-width: 5.4em;
+}
+
+button {
+  pointer-events: auto;
+  padding: 0.75em 2.4em;
+  border: 1px solid var(--silver);
+  background: linear-gradient(180deg, rgba(224, 32, 46, 0.92), rgba(122, 12, 20, 0.92));
+  color: #fff;
+  font: italic 700 clamp(14px, 1.6vw, 20px) / 1 'Avenir Next', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  letter-spacing: 0.3em;
+  transform: skewX(-14deg);
+  cursor: pointer;
+  animation: breathe 1.2s ease-in-out infinite alternate;
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+button:hover:not(:disabled) {
+  filter: brightness(1.25);
+}
+
+@keyframes breathe {
+  to {
+    box-shadow: 0 0 26px rgba(224, 32, 46, 0.8);
+  }
+}
+
+#result,
+#pause {
+  background: rgba(3, 5, 12, 0.72);
+  backdrop-filter: blur(3px);
+}
+
+#result h2,
+#pause h2 {
+  margin: 0;
+  font: italic 900 clamp(40px, 7vw, 96px) / 1 'PingFang SC', sans-serif;
+  letter-spacing: 0.14em;
+  background: linear-gradient(180deg, #fff 20%, #c9d2df 48%, #e0202e 54%, #7a0c14 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+#result p,
+#pause p {
+  margin: 0;
+  letter-spacing: 0.3em;
+  opacity: 0.85;
+}
+
+#result-stats {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 6px 26px;
+  font-size: clamp(13px, 1.4vw, 18px);
+  text-align: left;
+}
+
+#result-stats b {
+  color: var(--cyan);
+  text-align: right;
+  font-style: italic;
+}
+
+/* ------------------------------- narrow windows ------------------------------- */
+
+@media (max-width: 760px) {
+  .side .name span,
+  #stage-label {
+    display: none;
+  }
+
+  #hint {
+    font-size: 10px;
+    line-height: 1.9;
+    padding: 0 8px;
+  }
+
+  #hint kbd {
+    margin: 0 0.2em 0 0.5em;
+  }
+
+  .controls {
+    gap: 4px 12px;
+    font-size: 10.5px;
+  }
+
+  .controls kbd {
+    min-width: 3.2em;
+    margin-right: 0.3em;
+  }
+}
+
+/* short windows: the key list would push the start button off screen */
+@media (max-height: 640px) {
+  .controls {
+    display: none;
+  }
+}
